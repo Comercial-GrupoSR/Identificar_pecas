@@ -8,10 +8,59 @@ const elResult = document.getElementById('resultArea');
 const form = document.getElementById('formBusca');
 const input = document.getElementById('inputCodigo');
 const btnBuscar = document.getElementById('btnBuscar');
+const tabCodigo = document.getElementById('tabCodigo');
+const tabRamal = document.getElementById('tabRamal');
+const ramaisList = document.getElementById('ramaisList');
+
+let modo = 'codigo'; // 'codigo' | 'ramal'
+let ramaisCarregados = false;
 
 function setStatus(msg, isErr) {
   elStatus.textContent = msg || '';
   elStatus.className = 'status-line' + (isErr ? ' err' : '');
+}
+
+// ===== Alternar modo de busca =====
+function setModo(novoModo) {
+  modo = novoModo;
+  elResult.innerHTML = '';
+  setStatus('');
+  input.value = '';
+
+  if (modo === 'codigo') {
+    tabCodigo.classList.add('active');
+    tabRamal.classList.remove('active');
+    input.placeholder = 'Digite o código da peça…';
+    input.setAttribute('inputmode', 'numeric');
+    input.removeAttribute('list');
+  } else {
+    tabRamal.classList.add('active');
+    tabCodigo.classList.remove('active');
+    input.placeholder = 'Digite ou escolha o ramal…';
+    input.setAttribute('inputmode', 'text');
+    input.setAttribute('list', 'ramaisList');
+    carregarRamais();
+  }
+  input.focus();
+}
+
+tabCodigo.addEventListener('click', () => setModo('codigo'));
+tabRamal.addEventListener('click', () => setModo('ramal'));
+
+async function carregarRamais() {
+  if (ramaisCarregados) return;
+  try {
+    const res = await fetch(`${API_URL}?action=listarRamais`);
+    const data = await res.json();
+    if (data.ok) {
+      ramaisList.innerHTML = (data.ramais || [])
+        .map((r) => `<option value="${escapeHtml(r)}">`)
+        .join('');
+      ramaisCarregados = true;
+    }
+  } catch (err) {
+    console.error(err);
+  }
 }
 
 // ===== Busca =====
@@ -21,8 +70,8 @@ form.addEventListener('submit', (e) => {
 });
 
 async function buscar() {
-  const codigo = input.value.trim();
-  if (!codigo) return;
+  const termo = input.value.trim();
+  if (!termo) return;
   const apiUrl = API_URL;
 
   btnBuscar.disabled = true;
@@ -31,35 +80,41 @@ async function buscar() {
   elResult.innerHTML = '';
 
   try {
-    const res = await fetch(`${apiUrl}?action=buscar&codigo=${encodeURIComponent(codigo)}`);
+    const action = modo === 'ramal' ? 'buscarRamal' : 'buscar';
+    const param = modo === 'ramal' ? 'ramal' : 'codigo';
+    const res = await fetch(`${apiUrl}?action=${action}&${param}=${encodeURIComponent(termo)}`);
     const data = await res.json();
     if (!data.ok) {
       setStatus(data.erro || 'Erro ao buscar.', true);
       return;
     }
-    renderResultados(codigo, data.itens || []);
+    renderResultados(termo, data.itens || []);
     if ((data.itens || []).length === 0) {
-      setStatus('Nenhum item encontrado para esse código.', true);
+      setStatus(modo === 'ramal' ? 'Nenhuma peça encontrada para esse ramal.' : 'Nenhum item encontrado para esse código.', true);
     } else {
       setStatus('');
     }
   } catch (err) {
     console.error(err);
-    setStatus('Não foi possível conectar à planilha. Verifique a URL configurada.', true);
+    setStatus('Não foi possível conectar à planilha. Verifique sua internet.', true);
   } finally {
     btnBuscar.disabled = false;
     btnBuscar.textContent = 'Buscar';
   }
 }
 
-function renderResultados(codigo, itens) {
+function renderResultados(termo, itens) {
   if (itens.length === 0) {
-    elResult.innerHTML = `<div class="empty">Nada encontrado para o código <strong>${escapeHtml(codigo)}</strong>.</div>`;
+    const rotulo = modo === 'ramal' ? 'ramal' : 'código';
+    elResult.innerHTML = `<div class="empty">Nada encontrado para o ${rotulo} <strong>${escapeHtml(termo)}</strong>.</div>`;
     return;
   }
 
   const totalQtde = itens.reduce((acc, it) => acc + (parseFloat(it.qtde) || 0), 0);
-  const html = [`<div class="summary">${itens.length} local(is) · ${totalQtde} peça(s) no total</div>`, '<div class="cards">'];
+  const resumo = modo === 'ramal'
+    ? `${escapeHtml(termo)} · ${itens.length} peça(s) · ${totalQtde} unidade(s) no total`
+    : `${itens.length} local(is) · ${totalQtde} peça(s) no total`;
+  const html = [`<div class="summary">${resumo}</div>`, '<div class="cards">'];
 
   itens.forEach((it) => {
     const marcado = (it.situacao || '').trim();
@@ -74,10 +129,11 @@ function renderResultados(codigo, itens) {
           <div class="codigo-chip">${escapeHtml(it.codigo)}</div>
         </div>
         <div class="meta-row">
+          ${modo === 'ramal' ? '' : `
           <div class="meta local">
             <div class="k">Local</div>
             <div class="v">${escapeHtml(it.local)}</div>
-          </div>
+          </div>`}
           <div class="meta qtde">
             <div class="k">Qtde</div>
             <div class="v">${escapeHtml(it.qtde)}</div>
