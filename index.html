@@ -65,18 +65,6 @@
     border-radius:4px;
     letter-spacing: 0.03em;
   }
-  .cfg-btn{
-    background: transparent;
-    border: 1px solid rgba(255,255,255,0.25);
-    color: rgba(255,255,255,0.8);
-    border-radius: 8px;
-    padding: 6px 10px;
-    font-size: 12px;
-    font-family:'Inter',sans-serif;
-    cursor:pointer;
-  }
-  .cfg-btn:active{ background: rgba(255,255,255,0.1); }
-
   .search-wrap{
     max-width: 640px;
     margin: 0 auto;
@@ -243,7 +231,7 @@
   .card.marked-ok{ border-color: var(--ok); }
   .card.marked-bad{ border-color: var(--bad); }
 
-  .empty, .config-panel{
+  .empty{
     background: var(--panel);
     border: 1px dashed var(--line);
     border-radius: var(--radius);
@@ -251,50 +239,6 @@
     text-align:center;
     color: var(--ink-soft);
     font-size: 14px;
-  }
-
-  .config-panel{
-    text-align:left;
-    margin-top: 4px;
-  }
-  .config-panel h2{
-    font-family:'Barlow Condensed', sans-serif;
-    font-size: 18px;
-    text-transform: uppercase;
-    color: var(--ink);
-    margin: 0 0 10px;
-  }
-  .config-panel label{
-    display:block;
-    font-size: 12px;
-    font-weight:700;
-    color: var(--ink-soft);
-    margin-bottom: 6px;
-  }
-  .config-panel input[type="text"]{
-    width:100%;
-    padding: 10px 12px;
-    border-radius: 8px;
-    border: 1px solid var(--line);
-    font-size: 13px;
-    font-family:'Roboto Mono', monospace;
-    margin-bottom: 12px;
-  }
-  .config-panel .row{ display:flex; gap:8px; }
-  .config-panel button{
-    background: var(--accent);
-    color:#fff;
-    border:none;
-    border-radius: 8px;
-    padding: 10px 16px;
-    font-weight:700;
-    font-size: 13px;
-    cursor:pointer;
-  }
-  .config-panel .ghost{
-    background: transparent;
-    color: var(--ink-soft);
-    border: 1px solid var(--line);
   }
 
   .spinner{
@@ -312,7 +256,6 @@
 <div class="topbar">
   <div class="topbar-row">
     <div class="brand">Separação <span class="tag">Obra</span></div>
-    <button class="cfg-btn" id="btnConfig" type="button">⚙ Configurar</button>
   </div>
   <div class="search-wrap">
     <form class="search" id="formBusca" autocomplete="off">
@@ -324,7 +267,6 @@
 
 <main>
   <div class="status-line" id="statusLine"></div>
-  <div id="configArea"></div>
   <div id="resultArea"></div>
 </main>
 
