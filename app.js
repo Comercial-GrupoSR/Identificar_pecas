@@ -1,63 +1,18 @@
 // ===== Configuração =====
 // URL fixa do Apps Script (App da Web) ligado à sua planilha.
 // Se um dia trocar de planilha, basta atualizar essa linha e publicar de novo.
-const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbyXIYGd3D5-EODFc9Jm9R_egQS76EIT89SiK0KFpSVSKsNRsojOzCKuVPwOVCivvABY/exec';
-
-const STORAGE_KEY = 'obra_app_url_v1';
+const API_URL = 'https://script.google.com/macros/s/AKfycbyXIYGd3D5-EODFc9Jm9R_egQS76EIT89SiK0KFpSVSKsNRsojOzCKuVPwOVCivvABY/exec';
 
 const elStatus = document.getElementById('statusLine');
 const elResult = document.getElementById('resultArea');
-const elConfigArea = document.getElementById('configArea');
 const form = document.getElementById('formBusca');
 const input = document.getElementById('inputCodigo');
 const btnBuscar = document.getElementById('btnBuscar');
-const btnConfig = document.getElementById('btnConfig');
-
-function getApiUrl() {
-  return localStorage.getItem(STORAGE_KEY) || DEFAULT_API_URL;
-}
-function setApiUrl(url) {
-  localStorage.setItem(STORAGE_KEY, url.trim());
-}
 
 function setStatus(msg, isErr) {
   elStatus.textContent = msg || '';
   elStatus.className = 'status-line' + (isErr ? ' err' : '');
 }
-
-// ===== Painel de configuração =====
-function renderConfig(forceOpen) {
-  const url = getApiUrl();
-  if (url && !forceOpen) {
-    elConfigArea.innerHTML = '';
-    return;
-  }
-  elConfigArea.innerHTML = `
-    <div class="config-panel">
-      <h2>Configurar conexão com a planilha</h2>
-      <label>Cole aqui a URL do Apps Script (Web App)</label>
-      <input type="text" id="cfgUrl" placeholder="https://script.google.com/macros/s/AAAAA.../exec" value="${url ? url.replace(/"/g, '&quot;') : ''}">
-      <div class="row">
-        <button id="cfgSalvar" type="button">Salvar</button>
-        ${url ? '<button class="ghost" id="cfgCancelar" type="button">Cancelar</button>' : ''}
-      </div>
-    </div>
-  `;
-  document.getElementById('cfgSalvar').addEventListener('click', () => {
-    const v = document.getElementById('cfgUrl').value.trim();
-    if (!v.startsWith('https://script.google.com/')) {
-      setStatus('Essa não parece ser uma URL válida do Apps Script.', true);
-      return;
-    }
-    setApiUrl(v);
-    setStatus('Conexão salva.');
-    renderConfig(false);
-  });
-  const cancelBtn = document.getElementById('cfgCancelar');
-  if (cancelBtn) cancelBtn.addEventListener('click', () => renderConfig(false));
-}
-
-btnConfig.addEventListener('click', () => renderConfig(true));
 
 // ===== Busca =====
 form.addEventListener('submit', (e) => {
@@ -68,12 +23,7 @@ form.addEventListener('submit', (e) => {
 async function buscar() {
   const codigo = input.value.trim();
   if (!codigo) return;
-  const apiUrl = getApiUrl();
-  if (!apiUrl) {
-    setStatus('Configure a conexão com a planilha primeiro (⚙ Configurar).', true);
-    renderConfig(true);
-    return;
-  }
+  const apiUrl = API_URL;
 
   btnBuscar.disabled = true;
   btnBuscar.innerHTML = '<span class="spinner"></span>';
@@ -158,7 +108,7 @@ async function onMarcar(btn) {
   const novaSituacao = jaEstaAtivo ? '' : acaoClicada;
 
   card.classList.add('busy');
-  const apiUrl = getApiUrl();
+  const apiUrl = API_URL;
   try {
     const res = await fetch(`${apiUrl}?action=atualizar&linha=${encodeURIComponent(linha)}&situacao=${encodeURIComponent(novaSituacao)}`);
     const data = await res.json();
@@ -191,7 +141,6 @@ function escapeHtml(str) {
 }
 
 // ===== Inicialização =====
-renderConfig(false);
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').catch(() => {});
