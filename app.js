@@ -1,4 +1,8 @@
 // ===== Configuração =====
+// URL fixa do Apps Script (App da Web) ligado à sua planilha.
+// Se um dia trocar de planilha, basta atualizar essa linha e publicar de novo.
+const DEFAULT_API_URL = 'https://script.google.com/macros/s/AKfycbyXIYGd3D5-EODFc9Jm9R_egQS76EIT89SiK0KFpSVSKsNRsojOzCKuVPwOVCivvABY/exec';
+
 const STORAGE_KEY = 'obra_app_url_v1';
 
 const elStatus = document.getElementById('statusLine');
@@ -10,7 +14,7 @@ const btnBuscar = document.getElementById('btnBuscar');
 const btnConfig = document.getElementById('btnConfig');
 
 function getApiUrl() {
-  return localStorage.getItem(STORAGE_KEY) || '';
+  return localStorage.getItem(STORAGE_KEY) || DEFAULT_API_URL;
 }
 function setApiUrl(url) {
   localStorage.setItem(STORAGE_KEY, url.trim());
