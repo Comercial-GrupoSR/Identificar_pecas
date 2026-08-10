@@ -70,6 +70,26 @@
     margin: 0 auto;
     padding: 16px 16px 0;
   }
+  .mode-tabs{
+    display:flex; gap:6px; margin-bottom: 10px;
+  }
+  .mode-tabs button{
+    flex:1;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: rgba(255,255,255,0.7);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-weight:700;
+    font-family:'Inter',sans-serif;
+    cursor:pointer;
+  }
+  .mode-tabs button.active{
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
   form.search{
     display:flex;
     gap:8px;
@@ -258,10 +278,15 @@
     <div class="brand">Separação <span class="tag">Obra</span></div>
   </div>
   <div class="search-wrap">
+    <div class="mode-tabs">
+      <button type="button" id="tabCodigo" class="active" data-mode="codigo">Por código</button>
+      <button type="button" id="tabRamal" data-mode="ramal">Por ramal</button>
+    </div>
     <form class="search" id="formBusca" autocomplete="off">
-      <input type="text" id="inputCodigo" inputmode="numeric" placeholder="Digite o código da peça…" autofocus>
+      <input type="text" id="inputCodigo" inputmode="numeric" placeholder="Digite o código da peça…" autofocus list="ramaisList">
       <button type="submit" id="btnBuscar">Buscar</button>
     </form>
+    <datalist id="ramaisList"></datalist>
   </div>
 </div>
 
