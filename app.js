@@ -231,11 +231,12 @@ function renderResultados(termo, itens) {
 }
 
 function contarPorSituacao(itens) {
-  const c = { todos: itens.length, Separado: 0, 'Não encontrada': 0, pendente: 0 };
+  const c = { todos: itens.length, Separado: 0, Parcial: 0, 'Não encontrada': 0, pendente: 0 };
   itens.forEach((it) => {
-    const s = (it.situacao || '').trim();
-    if (s === 'Separado') c.Separado++;
-    else if (s === 'Não encontrada') c['Não encontrada']++;
+    const est = parseSituacao(it.situacao, it.qtde).estado;
+    if (est === 'completo') c.Separado++;
+    else if (est === 'parcial') c.Parcial++;
+    else if (est === 'nao_encontrada') c['Não encontrada']++;
     else c.pendente++;
   });
   return c;
@@ -243,8 +244,14 @@ function contarPorSituacao(itens) {
 
 function itensFiltrados() {
   if (filtroAtual === 'todos') return ultimosItens;
-  if (filtroAtual === 'pendente') return ultimosItens.filter((it) => !(it.situacao || '').trim());
-  return ultimosItens.filter((it) => (it.situacao || '').trim() === filtroAtual);
+  return ultimosItens.filter((it) => {
+    const est = parseSituacao(it.situacao, it.qtde).estado;
+    if (filtroAtual === 'Separado') return est === 'completo';
+    if (filtroAtual === 'Parcial') return est === 'parcial';
+    if (filtroAtual === 'Não encontrada') return est === 'nao_encontrada';
+    if (filtroAtual === 'pendente') return est === 'pendente';
+    return true;
+  });
 }
 
 function renderTudo() {
@@ -257,6 +264,7 @@ function renderTudo() {
   const chips = [
     { key: 'todos', label: `Todos (${c.todos})`, cls: '' },
     { key: 'Separado', label: `Separado (${c.Separado})`, cls: 'f-ok' },
+    { key: 'Parcial', label: `Parcial (${c.Parcial})`, cls: 'f-partial' },
     { key: 'Não encontrada', label: `Não encontrada (${c['Não encontrada']})`, cls: 'f-bad' },
     { key: 'pendente', label: `Pendente (${c.pendente})`, cls: 'f-pend' }
   ];
@@ -289,21 +297,31 @@ function renderTudo() {
   const btnExp = document.getElementById('btnExportar');
   if (btnExp) btnExp.addEventListener('click', exportarPDF);
 
-  elResult.querySelectorAll('.actions button').forEach((btn) => {
-    btn.addEventListener('click', () => onMarcar(btn));
+  elResult.querySelectorAll('.qty-plus').forEach((btn) => {
+    btn.addEventListener('click', () => onQtdChange(btn, 1));
+  });
+  elResult.querySelectorAll('.qty-minus').forEach((btn) => {
+    btn.addEventListener('click', () => onQtdChange(btn, -1));
+  });
+  elResult.querySelectorAll('.bad-btn').forEach((btn) => {
+    btn.addEventListener('click', () => onNaoEncontrada(btn));
   });
 }
 
 function renderCardsHtml(itens) {
   const parts = ['<div class="cards">'];
   itens.forEach((it) => {
-    const marcado = (it.situacao || '').trim();
-    const isOk = marcado === 'Separado';
-    const isBad = marcado === 'Não encontrada';
+    const total = parseFloat(it.qtde) || 0;
+    const est = parseSituacao(it.situacao, it.qtde);
+    const isOk = est.estado === 'completo';
+    const isBad = est.estado === 'nao_encontrada';
+    const isPartial = est.estado === 'parcial';
+    const found = est.found;
     parts.push(`
-      <div class="card ${isOk ? 'marked-ok' : ''} ${isBad ? 'marked-bad' : ''}" data-linha="${it.linha}">
+      <div class="card ${isOk ? 'marked-ok' : ''} ${isBad ? 'marked-bad' : ''} ${isPartial ? 'marked-partial' : ''}" data-linha="${it.linha}" data-total="${total}">
         <div class="stamp ok-stamp">Separado</div>
         <div class="stamp bad-stamp">Não encontrada</div>
+        <div class="stamp partial-stamp">Parcial ${found}/${total}</div>
         <div class="card-head">
           <div class="desc">${escapeHtml(it.descricao)}</div>
           <div class="codigo-chip">${escapeHtml(it.codigo)}</div>
@@ -314,13 +332,15 @@ function renderCardsHtml(itens) {
             <div class="k">Local</div>
             <div class="v">${escapeHtml(it.local)}</div>
           </div>`}
-          <div class="meta qtde">
-            <div class="k">Qtde</div>
-            <div class="v">${escapeHtml(it.qtde)}</div>
-          </div>
         </div>
         <div class="actions">
-          <button class="ok-btn ${isOk ? 'active' : ''}" data-acao="Separado">✓ Separado</button>
+          <div class="qty-track">
+            <div class="qty-label">Separado: <strong class="qty-value">${found}</strong> / ${total}</div>
+            <div class="qty-stepper">
+              <button class="qty-btn qty-minus" type="button" ${found <= 0 ? 'disabled' : ''}>−</button>
+              <button class="qty-btn qty-plus" type="button" ${found >= total ? 'disabled' : ''}>+</button>
+            </div>
+          </div>
           <button class="bad-btn ${isBad ? 'active' : ''}" data-acao="Não encontrada">✕ Não encontrada</button>
         </div>
       </div>
@@ -382,13 +402,7 @@ function rotuloFiltro(f) {
   return f;
 }
 
-async function onMarcar(btn) {
-  const card = btn.closest('.card');
-  const linha = card.getAttribute('data-linha');
-  const acaoClicada = btn.getAttribute('data-acao');
-  const jaEstaAtivo = btn.classList.contains('active');
-  const novaSituacao = jaEstaAtivo ? '' : acaoClicada;
-
+async function persistirSituacao(linha, novaSituacao) {
   // Atualiza local (na hora, mesmo offline)
   const item = ultimosItens.find((it) => String(it.linha) === String(linha));
   if (item) item.situacao = novaSituacao;
@@ -404,7 +418,6 @@ async function onMarcar(btn) {
 
   renderTudo();
 
-  // Tenta enviar para a planilha; se falhar, entra na fila
   if (!navigator.onLine) {
     adicionarNaFila(linha, novaSituacao);
     setStatus('Sem internet: marcação salva no aparelho, será enviada depois.', true);
@@ -423,10 +436,50 @@ async function onMarcar(btn) {
   }
 }
 
+function onQtdChange(btn, delta) {
+  const card = btn.closest('.card');
+  const linha = card.getAttribute('data-linha');
+  const total = parseFloat(card.getAttribute('data-total')) || 0;
+  const item = ultimosItens.find((it) => String(it.linha) === String(linha));
+  const atual = item ? parseSituacao(item.situacao, total).found : 0;
+  const novoFound = Math.max(0, Math.min(atual + delta, total));
+  const novaSituacao = situacaoFromFound(novoFound, total);
+  persistirSituacao(linha, novaSituacao);
+}
+
+function onNaoEncontrada(btn) {
+  const card = btn.closest('.card');
+  const linha = card.getAttribute('data-linha');
+  const jaEstaAtivo = btn.classList.contains('active');
+  const novaSituacao = jaEstaAtivo ? '' : 'Não encontrada';
+  persistirSituacao(linha, novaSituacao);
+}
+
 function escapeHtml(str) {
   return String(str ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[c]));
+}
+
+// ===== Situação com quantidade parcial =====
+// Formatos guardados na planilha: "" (pendente) | "Separado" (completo) |
+// "Parcial X/Y" (parte encontrada) | "Não encontrada"
+function parseSituacao(situacaoRaw, total) {
+  const s = String(situacaoRaw || '').trim();
+  const totalNum = parseFloat(total) || 0;
+  if (s === 'Separado') return { found: totalNum, estado: 'completo' };
+  if (s === 'Não encontrada') return { found: 0, estado: 'nao_encontrada' };
+  const m = s.match(/^Parcial\s+([\d.,]+)\s*\/\s*([\d.,]+)$/i);
+  if (m) return { found: parseFloat(m[1].replace(',', '.')), estado: 'parcial' };
+  return { found: 0, estado: 'pendente' };
+}
+
+function situacaoFromFound(found, total) {
+  const totalNum = parseFloat(total) || 0;
+  const foundNum = Math.max(0, Math.min(found, totalNum));
+  if (foundNum <= 0) return '';
+  if (foundNum >= totalNum) return 'Separado';
+  return `Parcial ${foundNum}/${totalNum}`;
 }
 
 // ===== Inicialização =====
