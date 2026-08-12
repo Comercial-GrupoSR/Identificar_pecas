@@ -274,8 +274,44 @@
   .actions{
     display:flex; gap:8px;
     margin-top: 14px;
+    align-items:center;
   }
-  .actions button{
+  .qty-track{
+    display:flex; align-items:center; justify-content:space-between;
+    gap:10px;
+    background: var(--bg);
+    border: 1.5px solid var(--line);
+    border-radius: 10px;
+    padding: 8px 10px;
+    flex: 1.4;
+  }
+  .qty-track .qty-label{
+    font-size: 12px;
+    font-weight:700;
+    color: var(--ink-soft);
+  }
+  .qty-track .qty-label strong{
+    color: var(--ink);
+    font-size: 15px;
+    font-family:'Roboto Mono', monospace;
+  }
+  .qty-stepper{ display:flex; align-items:center; gap:6px; }
+  .qty-btn{
+    width: 30px; height:30px;
+    border-radius: 8px;
+    border: none;
+    background: var(--ink);
+    color:#fff;
+    font-size: 17px;
+    font-weight:700;
+    line-height:1;
+    cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .qty-btn:active{ opacity:0.8; }
+  .qty-btn:disabled{ opacity:0.3; }
+
+  .actions button.bad-btn{
     flex:1;
     border-radius: 10px;
     border: 2px solid var(--line);
@@ -287,17 +323,14 @@
     cursor:pointer;
     color: var(--ink);
   }
-  .actions button.ok-btn.active{
-    background: var(--ok-bg);
-    border-color: var(--ok);
-    color: var(--ok);
-  }
   .actions button.bad-btn.active{
     background: var(--bad-bg);
     border-color: var(--bad);
     color: var(--bad);
   }
   .actions button:active{ transform: translateY(1px); }
+
+  .filter-chip.active.f-partial{ background: #F08C00; border-color: #F08C00; color:#fff; }
 
   /* carimbo / stamp */
   .stamp{
@@ -318,8 +351,10 @@
   }
   .card.marked-ok .stamp.ok-stamp{ opacity: 0.9; color: var(--ok); }
   .card.marked-bad .stamp.bad-stamp{ opacity: 0.9; color: var(--bad); }
+  .card.marked-partial .stamp.partial-stamp{ opacity: 0.9; color: #F08C00; }
   .card.marked-ok{ border-color: var(--ok); }
   .card.marked-bad{ border-color: var(--bad); }
+  .card.marked-partial{ border-color: #F08C00; }
 
   .empty{
     background: var(--panel);
