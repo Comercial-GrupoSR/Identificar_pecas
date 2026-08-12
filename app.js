@@ -11,9 +11,13 @@ const btnBuscar = document.getElementById('btnBuscar');
 const tabCodigo = document.getElementById('tabCodigo');
 const tabRamal = document.getElementById('tabRamal');
 const ramaisList = document.getElementById('ramaisList');
+const syncStatusText = document.getElementById('syncStatusText');
+const btnSincronizar = document.getElementById('btnSincronizar');
+
+const DADOS_KEY = 'obra_dados_locais_v1';
+const FILA_KEY = 'obra_fila_pendente_v1';
 
 let modo = 'codigo'; // 'codigo' | 'ramal'
-let ramaisCarregados = false;
 let ultimosItens = [];
 let ultimoTermo = '';
 let filtroAtual = 'todos'; // 'todos' | 'Separado' | 'Não encontrada' | 'pendente'
@@ -22,6 +26,123 @@ function setStatus(msg, isErr) {
   elStatus.textContent = msg || '';
   elStatus.className = 'status-line' + (isErr ? ' err' : '');
 }
+
+// ===== Armazenamento local (offline) =====
+function salvarDadosLocais(itens) {
+  localStorage.setItem(DADOS_KEY, JSON.stringify({ itens: itens, atualizadoEm: Date.now() }));
+}
+function carregarDadosLocais() {
+  try {
+    const raw = localStorage.getItem(DADOS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+function carregarFila() {
+  try {
+    const raw = localStorage.getItem(FILA_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+function salvarFila(fila) {
+  localStorage.setItem(FILA_KEY, JSON.stringify(fila));
+}
+function adicionarNaFila(linha, situacao) {
+  const fila = carregarFila();
+  fila[linha] = situacao;
+  salvarFila(fila);
+  atualizarBarraSync();
+}
+
+// ===== Baixar planilha inteira (precisa de internet) =====
+async function baixarDadosCompletos(silencioso) {
+  if (!navigator.onLine) {
+    if (!silencioso) setStatus('Sem internet no momento — não é possível sincronizar agora.', true);
+    return false;
+  }
+  try {
+    if (!silencioso) setStatus('Baixando dados da planilha...');
+    const res = await fetch(`${API_URL}?action=listarTudo`);
+    const data = await res.json();
+    if (data.ok) {
+      salvarDadosLocais(data.itens);
+      if (!silencioso) setStatus('Dados atualizados no aparelho.');
+      atualizarBarraSync();
+      return true;
+    }
+    if (!silencioso) setStatus(data.erro || 'Falha ao sincronizar.', true);
+  } catch (err) {
+    console.error(err);
+    if (!silencioso) setStatus('Falha ao sincronizar. Verifique sua internet.', true);
+  }
+  return false;
+}
+
+// ===== Enviar marcações pendentes para a planilha =====
+async function sincronizarFila(silencioso) {
+  if (!navigator.onLine) return;
+  const fila = carregarFila();
+  const linhas = Object.keys(fila);
+  if (linhas.length === 0) return;
+
+  for (const linha of linhas) {
+    try {
+      const situacao = fila[linha];
+      const res = await fetch(`${API_URL}?action=atualizar&linha=${encodeURIComponent(linha)}&situacao=${encodeURIComponent(situacao)}`);
+      const data = await res.json();
+      if (data.ok) {
+        delete fila[linha];
+        salvarFila(fila);
+      }
+    } catch (err) {
+      console.error(err);
+      break; // sem internet de novo, tenta o resto depois
+    }
+  }
+  atualizarBarraSync();
+}
+
+// ===== Barra de status de sincronização =====
+function atualizarBarraSync() {
+  const fila = carregarFila();
+  const pendentes = Object.keys(fila).length;
+  const dados = carregarDadosLocais();
+
+  if (!navigator.onLine) {
+    syncStatusText.textContent = pendentes > 0
+      ? `⚠ Sem internet · ${pendentes} pendente(s)`
+      : '⚠ Sem internet · usando dados salvos';
+    syncStatusText.className = 'offline';
+    return;
+  }
+
+  if (pendentes > 0) {
+    syncStatusText.textContent = `${pendentes} marcação(ões) aguardando envio…`;
+    syncStatusText.className = 'pending';
+    return;
+  }
+
+  if (dados && dados.atualizadoEm) {
+    const min = Math.round((Date.now() - dados.atualizadoEm) / 60000);
+    const quando = min < 1 ? 'agora mesmo' : min < 60 ? `há ${min} min` : `há ${Math.round(min / 60)}h`;
+    syncStatusText.textContent = `Sincronizado ${quando}`;
+  } else {
+    syncStatusText.textContent = 'Ainda não sincronizado';
+  }
+  syncStatusText.className = '';
+}
+
+btnSincronizar.addEventListener('click', async () => {
+  btnSincronizar.disabled = true;
+  await sincronizarFila(true);
+  await baixarDadosCompletos(false);
+  btnSincronizar.disabled = false;
+});
+
+window.addEventListener('online', () => {
+  atualizarBarraSync();
+  sincronizarFila(true).then(() => baixarDadosCompletos(true));
+});
+window.addEventListener('offline', atualizarBarraSync);
 
 // ===== Alternar modo de busca =====
 function setModo(novoModo) {
@@ -42,7 +163,7 @@ function setModo(novoModo) {
     input.placeholder = 'Digite ou escolha o ramal…';
     input.setAttribute('inputmode', 'text');
     input.setAttribute('list', 'ramaisList');
-    carregarRamais();
+    preencherListaRamais();
   }
   input.focus();
 }
@@ -50,20 +171,17 @@ function setModo(novoModo) {
 tabCodigo.addEventListener('click', () => setModo('codigo'));
 tabRamal.addEventListener('click', () => setModo('ramal'));
 
-async function carregarRamais() {
-  if (ramaisCarregados) return;
-  try {
-    const res = await fetch(`${API_URL}?action=listarRamais`);
-    const data = await res.json();
-    if (data.ok) {
-      ramaisList.innerHTML = (data.ramais || [])
-        .map((r) => `<option value="${escapeHtml(r)}">`)
-        .join('');
-      ramaisCarregados = true;
-    }
-  } catch (err) {
-    console.error(err);
-  }
+function preencherListaRamais() {
+  const dados = carregarDadosLocais();
+  if (!dados) return;
+  const vistos = {};
+  const lista = [];
+  dados.itens.forEach((it) => {
+    const l = String(it.local || '').trim();
+    if (l && !vistos[l]) { vistos[l] = true; lista.push(l); }
+  });
+  lista.sort();
+  ramaisList.innerHTML = lista.map((r) => `<option value="${escapeHtml(r)}">`).join('');
 }
 
 // ===== Busca =====
@@ -75,35 +193,27 @@ form.addEventListener('submit', (e) => {
 async function buscar() {
   const termo = input.value.trim();
   if (!termo) return;
-  const apiUrl = API_URL;
 
-  btnBuscar.disabled = true;
-  btnBuscar.innerHTML = '<span class="spinner"></span>';
-  setStatus('Buscando...');
-  elResult.innerHTML = '';
-
-  try {
-    const action = modo === 'ramal' ? 'buscarRamal' : 'buscar';
-    const param = modo === 'ramal' ? 'ramal' : 'codigo';
-    const res = await fetch(`${apiUrl}?action=${action}&${param}=${encodeURIComponent(termo)}`);
-    const data = await res.json();
-    if (!data.ok) {
-      setStatus(data.erro || 'Erro ao buscar.', true);
+  let dados = carregarDadosLocais();
+  if (!dados) {
+    setStatus('Baixando dados da planilha pela primeira vez...');
+    const ok = await baixarDadosCompletos(true);
+    if (!ok) {
+      setStatus('Sem dados salvos no aparelho ainda. Conecte à internet uma vez para sincronizar.', true);
       return;
     }
-    renderResultados(termo, data.itens || []);
-    if ((data.itens || []).length === 0) {
-      setStatus(modo === 'ramal' ? 'Nenhuma peça encontrada para esse ramal.' : 'Nenhum item encontrado para esse código.', true);
-    } else {
-      setStatus('');
-    }
-  } catch (err) {
-    console.error(err);
-    setStatus('Não foi possível conectar à planilha. Verifique sua internet.', true);
-  } finally {
-    btnBuscar.disabled = false;
-    btnBuscar.textContent = 'Buscar';
+    dados = carregarDadosLocais();
   }
+
+  const termoNorm = termo.trim().toLowerCase();
+  const itens = dados.itens.filter((it) => {
+    return modo === 'ramal'
+      ? String(it.local || '').trim().toLowerCase() === termoNorm
+      : String(it.codigo || '').trim() === termo.trim();
+  });
+
+  renderResultados(termo, itens);
+  setStatus('');
 }
 
 function renderResultados(termo, itens) {
@@ -277,27 +387,39 @@ async function onMarcar(btn) {
   const linha = card.getAttribute('data-linha');
   const acaoClicada = btn.getAttribute('data-acao');
   const jaEstaAtivo = btn.classList.contains('active');
-  // clicar de novo no mesmo status desmarca (volta a vazio)
   const novaSituacao = jaEstaAtivo ? '' : acaoClicada;
 
-  card.classList.add('busy');
-  const apiUrl = API_URL;
-  try {
-    const res = await fetch(`${apiUrl}?action=atualizar&linha=${encodeURIComponent(linha)}&situacao=${encodeURIComponent(novaSituacao)}`);
-    const data = await res.json();
-    if (!data.ok) {
-      setStatus(data.erro || 'Erro ao salvar.', true);
-      return;
+  // Atualiza local (na hora, mesmo offline)
+  const item = ultimosItens.find((it) => String(it.linha) === String(linha));
+  if (item) item.situacao = novaSituacao;
+
+  const dadosLocais = carregarDadosLocais();
+  if (dadosLocais) {
+    const itemLocal = dadosLocais.itens.find((it) => String(it.linha) === String(linha));
+    if (itemLocal) {
+      itemLocal.situacao = novaSituacao;
+      salvarDadosLocais(dadosLocais.itens);
     }
-    const item = ultimosItens.find((it) => String(it.linha) === String(linha));
-    if (item) item.situacao = novaSituacao;
+  }
+
+  renderTudo();
+
+  // Tenta enviar para a planilha; se falhar, entra na fila
+  if (!navigator.onLine) {
+    adicionarNaFila(linha, novaSituacao);
+    setStatus('Sem internet: marcação salva no aparelho, será enviada depois.', true);
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_URL}?action=atualizar&linha=${encodeURIComponent(linha)}&situacao=${encodeURIComponent(novaSituacao)}`);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.erro || 'Erro ao salvar.');
     setStatus('Situação salva na planilha.');
-    renderTudo();
   } catch (err) {
     console.error(err);
-    setStatus('Não foi possível salvar. Verifique sua conexão.', true);
-  } finally {
-    card.classList.remove('busy');
+    adicionarNaFila(linha, novaSituacao);
+    setStatus('Sem conexão no momento: marcação salva no aparelho, será enviada depois.', true);
   }
 }
 
@@ -308,6 +430,9 @@ function escapeHtml(str) {
 }
 
 // ===== Inicialização =====
+atualizarBarraSync();
+sincronizarFila(true).then(() => baixarDadosCompletos(true));
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').catch(() => {});
