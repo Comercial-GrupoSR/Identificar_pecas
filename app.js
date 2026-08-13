@@ -21,6 +21,7 @@ let modo = 'codigo'; // 'codigo' | 'ramal'
 let ultimosItens = [];
 let ultimoTermo = '';
 let filtroAtual = 'todos'; // 'todos' | 'Separado' | 'Não encontrada' | 'pendente'
+let cardsEmEdicao = new Set(); // linhas destravadas para poder diminuir/desfazer
 
 function setStatus(msg, isErr) {
   elStatus.textContent = msg || '';
@@ -143,6 +144,17 @@ window.addEventListener('online', () => {
   sincronizarFila(true).then(() => baixarDadosCompletos(true));
 });
 window.addEventListener('offline', atualizarBarraSync);
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    Object.keys(timersEnvio).forEach((linha) => {
+      clearTimeout(timersEnvio[linha]);
+      delete timersEnvio[linha];
+      const item = ultimosItens.find((it) => String(it.linha) === String(linha));
+      if (item) enviarSituacao(linha, item.situacao);
+    });
+  }
+});
 
 // ===== Alternar modo de busca =====
 function setModo(novoModo) {
@@ -402,8 +414,11 @@ function rotuloFiltro(f) {
   return f;
 }
 
-async function persistirSituacao(linha, novaSituacao) {
-  // Atualiza local (na hora, mesmo offline)
+const timersEnvio = {}; // linha -> timeoutId (debounce por linha)
+const DEBOUNCE_ENVIO_MS = 600;
+
+function persistirSituacao(linha, novaSituacao) {
+  // 1) Atualiza local na hora, para resposta instantânea na tela
   const item = ultimosItens.find((it) => String(it.linha) === String(linha));
   if (item) item.situacao = novaSituacao;
 
@@ -418,6 +433,19 @@ async function persistirSituacao(linha, novaSituacao) {
 
   renderTudo();
 
+  // 2) Agenda o envio para a planilha — se o usuário tocar de novo antes do
+  // tempo passar, cancela o envio anterior e reagenda. Isso garante que só
+  // o valor final seja gravado, evitando que gravações concorrentes (uma
+  // por toque) cheguem fora de ordem e sobrescrevam um valor mais novo com
+  // um mais antigo.
+  if (timersEnvio[linha]) clearTimeout(timersEnvio[linha]);
+  timersEnvio[linha] = setTimeout(() => {
+    delete timersEnvio[linha];
+    enviarSituacao(linha, novaSituacao);
+  }, DEBOUNCE_ENVIO_MS);
+}
+
+async function enviarSituacao(linha, novaSituacao) {
   if (!navigator.onLine) {
     adicionarNaFila(linha, novaSituacao);
     setStatus('Sem internet: marcação salva no aparelho, será enviada depois.', true);
