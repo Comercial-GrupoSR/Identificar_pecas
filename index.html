@@ -296,6 +296,20 @@
     font-family:'Roboto Mono', monospace;
   }
   .qty-stepper{ display:flex; align-items:center; gap:6px; }
+  .qty-edit-toggle{
+    width: 28px; height:28px;
+    border-radius: 8px;
+    border: 1.5px solid var(--line);
+    background: var(--panel);
+    font-size: 13px;
+    cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    margin-right: 2px;
+  }
+  .qty-edit-toggle.active{
+    background: #FFF3BF;
+    border-color: #F08C00;
+  }
   .qty-btn{
     width: 30px; height:30px;
     border-radius: 8px;
