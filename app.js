@@ -20,8 +20,14 @@ const FILA_KEY = 'obra_fila_pendente_v1';
 let modo = 'codigo'; // 'codigo' | 'ramal'
 let ultimosItens = [];
 let ultimoTermo = '';
-let filtroAtual = 'todos'; // 'todos' | 'Separado' | 'Não encontrada' | 'pendente'
+let filtroAtual = 'todos'; // 'todos' | 'Separado' | 'Parcial' | 'Não encontrada' | 'pendente'
 let cardsEmEdicao = new Set(); // linhas destravadas para poder diminuir/desfazer
+
+// ---- Controle de sincronização por linha (nova versão robusta) ----
+const DEBOUNCE_ENVIO_MS = 600;
+const timersEnvio = {};       // linha -> timeoutId (debounce antes de enviar)
+const envioEmAndamento = {};  // linha -> true se já existe um fetch em curso para essa linha
+const valorPendente = {};     // linha -> último valor que ainda precisa ser confirmado no servidor
 
 function setStatus(msg, isErr) {
   elStatus.textContent = msg || '';
@@ -65,7 +71,35 @@ async function baixarDadosCompletos(silencioso) {
     const res = await fetch(`${API_URL}?action=listarTudo`);
     const data = await res.json();
     if (data.ok) {
-      salvarDadosLocais(data.itens);
+      // IMPORTANTE: não deixamos o download sobrescrever uma linha que ainda
+      // tem uma mudança local aguardando confirmação (na fila offline ou com
+      // um envio pendente/em andamento). Sem isso, uma sincronização em
+      // segundo plano podia "voltar" uma marcação que o usuário acabou de
+      // fazer — que era exatamente o sintoma relatado (marca 6/6, depois
+      // volta para pendente).
+      const fila = carregarFila();
+      const itensAjustados = data.itens.map((it) => {
+        const linhaStr = String(it.linha);
+        if (Object.prototype.hasOwnProperty.call(fila, linhaStr)) {
+          return { ...it, situacao: fila[linhaStr] };
+        }
+        if (Object.prototype.hasOwnProperty.call(valorPendente, linhaStr)) {
+          return { ...it, situacao: valorPendente[linhaStr] };
+        }
+        return it;
+      });
+
+      salvarDadosLocais(itensAjustados);
+
+      // Se a busca atual já estiver na tela, atualiza os itens exibidos também.
+      if (ultimosItens.length) {
+        itensAjustados.forEach((novo) => {
+          const atual = ultimosItens.find((it) => String(it.linha) === String(novo.linha));
+          if (atual) atual.situacao = novo.situacao;
+        });
+        renderTudo();
+      }
+
       if (!silencioso) setStatus('Dados atualizados no aparelho.');
       atualizarBarraSync();
       return true;
@@ -78,7 +112,7 @@ async function baixarDadosCompletos(silencioso) {
   return false;
 }
 
-// ===== Enviar marcações pendentes para a planilha =====
+// ===== Enviar marcações pendentes (feitas offline) para a planilha =====
 async function sincronizarFila(silencioso) {
   if (!navigator.onLine) return;
   const fila = carregarFila();
@@ -105,7 +139,7 @@ async function sincronizarFila(silencioso) {
 // ===== Barra de status de sincronização =====
 function atualizarBarraSync() {
   const fila = carregarFila();
-  const pendentes = Object.keys(fila).length;
+  const pendentes = Object.keys(fila).length + Object.keys(valorPendente).length;
   const dados = carregarDadosLocais();
 
   if (!navigator.onLine) {
@@ -147,11 +181,16 @@ window.addEventListener('offline', atualizarBarraSync);
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
+    // Cancela os debounces pendentes e força o processamento imediato de
+    // qualquer valor ainda não confirmado, mas passando pelo MESMO caminho
+    // (processarEnvio) usado no fluxo normal — assim nunca existem dois
+    // envios simultâneos para a mesma linha "brigando" entre si.
     Object.keys(timersEnvio).forEach((linha) => {
       clearTimeout(timersEnvio[linha]);
       delete timersEnvio[linha];
-      const item = ultimosItens.find((it) => String(it.linha) === String(linha));
-      if (item) enviarSituacao(linha, item.situacao);
+    });
+    Object.keys(valorPendente).forEach((linha) => {
+      processarEnvio(linha);
     });
   }
 });
@@ -282,13 +321,8 @@ function renderTudo() {
   ];
 
   const html = [
-    `<div class="summary">
-      <span>${resumo}</span>
-      <button class="export-btn" id="btnExportar" type="button">⬇ Exportar PDF</button>
-    </div>`,
-    `<div class="filter-bar">${chips.map((ch) =>
-      `<button class="filter-chip ${ch.cls} ${filtroAtual === ch.key ? 'active' : ''}" data-filtro="${ch.key}">${ch.label}</button>`
-    ).join('')}</div>`
+    `<div class="summary"> <span>${resumo}</span> <button class="export-btn" id="btnExportar" type="button">⬇ Exportar PDF</button> </div>`,
+    `<div class="filter-bar">${chips.map((ch) => `<button class="filter-chip ${ch.cls} ${filtroAtual === ch.key ? 'active' : ''}" data-filtro="${ch.key}">${ch.label}</button>`).join('')}</div>`
   ];
 
   const filtrados = itensFiltrados();
@@ -386,7 +420,7 @@ function exportarPDF() {
   doc.setFontSize(10);
   doc.setTextColor(100);
   const rotulo = modo === 'ramal' ? 'Ramal' : 'Código';
-  doc.text(`${rotulo}: ${ultimoTermo}   ·   Filtro: ${rotuloFiltro(filtroAtual)}   ·   Gerado em ${dataStr}`, 14, 22);
+  doc.text(`${rotulo}: ${ultimoTermo} · Filtro: ${rotuloFiltro(filtroAtual)} · Gerado em ${dataStr}`, 14, 22);
 
   const colunas = modo === 'ramal'
     ? ['Código', 'Descrição', 'Qtde', 'Situação']
@@ -425,8 +459,7 @@ function rotuloFiltro(f) {
   return f;
 }
 
-const timersEnvio = {}; // linha -> timeoutId (debounce por linha)
-const DEBOUNCE_ENVIO_MS = 600;
+// ===== Sincronização robusta (envio) =====
 
 function persistirSituacao(linha, novaSituacao) {
   // 1) Atualiza local na hora, para resposta instantânea na tela
@@ -444,16 +477,39 @@ function persistirSituacao(linha, novaSituacao) {
 
   renderTudo();
 
-  // 2) Agenda o envio para a planilha — se o usuário tocar de novo antes do
-  // tempo passar, cancela o envio anterior e reagenda. Isso garante que só
-  // o valor final seja gravado, evitando que gravações concorrentes (uma
-  // por toque) cheguem fora de ordem e sobrescrevam um valor mais novo com
-  // um mais antigo.
+  // 2) Guarda sempre o valor mais recente como "o que precisa estar no
+  // servidor" para essa linha — se o usuário apertar várias vezes seguidas,
+  // isso é sobrescrito e nunca acumula valores intermediários.
+  valorPendente[String(linha)] = novaSituacao;
+  atualizarBarraSync();
+
+  // 3) Agenda o envio (debounce). Cada novo toque cancela o timer anterior.
   if (timersEnvio[linha]) clearTimeout(timersEnvio[linha]);
   timersEnvio[linha] = setTimeout(() => {
     delete timersEnvio[linha];
-    enviarSituacao(linha, novaSituacao);
+    processarEnvio(linha);
   }, DEBOUNCE_ENVIO_MS);
+}
+
+// Garante que NUNCA existam dois envios simultâneos para a mesma linha
+// (o que causava valores fora de ordem chegando na planilha). Se o valor
+// mudar de novo enquanto um envio está em andamento, o novo valor fica
+// esperando e é enviado automaticamente assim que o envio atual terminar.
+async function processarEnvio(linha) {
+  const linhaStr = String(linha);
+  if (envioEmAndamento[linhaStr]) return; // já existe um fetch rodando para essa linha
+  const situacao = valorPendente[linhaStr];
+  if (situacao === undefined) return;
+
+  envioEmAndamento[linhaStr] = true;
+  await enviarSituacao(linhaStr, situacao);
+  delete envioEmAndamento[linhaStr];
+
+  // Se durante o envio o valor mudou de novo (ou o envio falhou e o valor
+  // continua pendente), processa de novo agora, sem esperar outro debounce.
+  if (valorPendente[linhaStr] !== undefined) {
+    processarEnvio(linhaStr);
+  }
 }
 
 async function enviarSituacao(linha, novaSituacao) {
@@ -467,7 +523,19 @@ async function enviarSituacao(linha, novaSituacao) {
     const res = await fetch(`${API_URL}?action=atualizar&linha=${encodeURIComponent(linha)}&situacao=${encodeURIComponent(novaSituacao)}`);
     const data = await res.json();
     if (!data.ok) throw new Error(data.erro || 'Erro ao salvar.');
+
+    // Confere se o Apps Script confirmou exatamente o valor que enviamos.
+    if (data.situacao !== undefined && String(data.situacao).trim() !== String(novaSituacao).trim()) {
+      throw new Error('A planilha confirmou um valor diferente do enviado.');
+    }
+
+    // Só limpa o "pendente" se ainda for o mesmo valor que acabamos de
+    // confirmar — se mudou nesse meio-tempo, o processarEnvio vai reenviar.
+    if (valorPendente[linha] === novaSituacao) {
+      delete valorPendente[linha];
+    }
     setStatus('Situação salva na planilha.');
+    atualizarBarraSync();
   } catch (err) {
     console.error(err);
     adicionarNaFila(linha, novaSituacao);
