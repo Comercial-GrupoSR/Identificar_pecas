@@ -175,6 +175,9 @@
     flex-wrap: wrap;
   }
 
+  .summary-btns{
+    display:flex; gap:6px; flex-wrap:wrap;
+  }
   .export-btn{
     background: var(--ink);
     color: #fff;
@@ -191,6 +194,41 @@
     white-space: nowrap;
   }
   .export-btn:active{ opacity: 0.85; }
+  .export-btn.drive-btn{
+    background: #1a73e8;
+  }
+
+  .stats-row{
+    display:flex; gap:8px;
+    margin: 10px 2px 0;
+  }
+  .stat-box{
+    flex:1;
+    background: var(--panel);
+    border: 1.5px solid var(--line);
+    border-radius: 10px;
+    padding: 8px 6px;
+    text-align:center;
+    display:flex; flex-direction:column; gap:1px;
+  }
+  .stat-num{
+    font-family:'Roboto Mono', monospace;
+    font-size: 18px;
+    font-weight:700;
+    color: var(--ink);
+  }
+  .stat-label{
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-soft);
+    font-weight:700;
+  }
+  .stat-box.stat-ok{ border-color: var(--ok); }
+  .stat-box.stat-ok .stat-num{ color: var(--ok); }
+  .stat-box.stat-bad{ border-color: var(--bad); }
+  .stat-box.stat-bad .stat-num{ color: var(--bad); }
+  .stat-box.stat-pend{ border-color: var(--pending); }
 
   .filter-bar{
     display:flex; gap:6px; flex-wrap:wrap;
@@ -231,12 +269,13 @@
   .card.busy{ opacity: 0.55; pointer-events:none; }
 
   .card-head{
-    display:flex; justify-content:space-between; align-items:flex-start; gap:10px;
+    display:flex; justify-content:flex-start; align-items:flex-start; gap:10px;
   }
   .desc{
     font-size: 15px;
     font-weight:600;
     line-height:1.3;
+    margin-top: 8px;
   }
   .codigo-chip{
     font-family:'Roboto Mono', monospace;
@@ -343,6 +382,7 @@
     color: var(--bad);
   }
   .actions button:active{ transform: translateY(1px); }
+  .actions button:disabled{ opacity:0.35; cursor:not-allowed; }
 
   .filter-chip.active.f-partial{ background: #F08C00; border-color: #F08C00; color:#fff; }
 
