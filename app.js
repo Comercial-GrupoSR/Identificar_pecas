@@ -71,12 +71,6 @@ async function baixarDadosCompletos(silencioso) {
     const res = await fetch(`${API_URL}?action=listarTudo`);
     const data = await res.json();
     if (data.ok) {
-      // IMPORTANTE: não deixamos o download sobrescrever uma linha que ainda
-      // tem uma mudança local aguardando confirmação (na fila offline ou com
-      // um envio pendente/em andamento). Sem isso, uma sincronização em
-      // segundo plano podia "voltar" uma marcação que o usuário acabou de
-      // fazer — que era exatamente o sintoma relatado (marca 6/6, depois
-      // volta para pendente).
       const fila = carregarFila();
       const itensAjustados = data.itens.map((it) => {
         const linhaStr = String(it.linha);
@@ -91,7 +85,6 @@ async function baixarDadosCompletos(silencioso) {
 
       salvarDadosLocais(itensAjustados);
 
-      // Se a busca atual já estiver na tela, atualiza os itens exibidos também.
       if (ultimosItens.length) {
         itensAjustados.forEach((novo) => {
           const atual = ultimosItens.find((it) => String(it.linha) === String(novo.linha));
@@ -130,7 +123,7 @@ async function sincronizarFila(silencioso) {
       }
     } catch (err) {
       console.error(err);
-      break; // sem internet de novo, tenta o resto depois
+      break;
     }
   }
   atualizarBarraSync();
@@ -181,10 +174,6 @@ window.addEventListener('offline', atualizarBarraSync);
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
-    // Cancela os debounces pendentes e força o processamento imediato de
-    // qualquer valor ainda não confirmado, mas passando pelo MESMO caminho
-    // (processarEnvio) usado no fluxo normal — assim nunca existem dois
-    // envios simultâneos para a mesma linha "brigando" entre si.
     Object.keys(timersEnvio).forEach((linha) => {
       clearTimeout(timersEnvio[linha]);
       delete timersEnvio[linha];
@@ -305,6 +294,23 @@ function itensFiltrados() {
   });
 }
 
+function contarUnidadesPorSituacao(itens) {
+  let separadas = 0;
+  let naoEncontradas = 0;
+  let pendentes = 0;
+  itens.forEach((it) => {
+    const total = parseFloat(it.qtde) || 0;
+    const est = parseSituacao(it.situacao, it.qtde);
+    if (est.estado === 'nao_encontrada') {
+      naoEncontradas += total;
+    } else {
+      separadas += est.found;
+      pendentes += (total - est.found);
+    }
+  });
+  return { separadas, naoEncontradas, pendentes };
+}
+
 function renderTudo() {
   const totalQtde = ultimosItens.reduce((acc, it) => acc + (parseFloat(it.qtde) || 0), 0);
   const resumo = modo === 'ramal'
@@ -312,6 +318,7 @@ function renderTudo() {
     : `${ultimosItens.length} local(is) · ${totalQtde} peça(s) no total`;
 
   const c = contarPorSituacao(ultimosItens);
+  const u = contarUnidadesPorSituacao(ultimosItens);
   const chips = [
     { key: 'todos', label: `Todos (${c.todos})`, cls: '' },
     { key: 'Separado', label: `Separado (${c.Separado})`, cls: 'f-ok' },
@@ -321,7 +328,12 @@ function renderTudo() {
   ];
 
   const html = [
-    `<div class="summary"> <span>${resumo}</span> <button class="export-btn" id="btnExportar" type="button">⬇ Exportar PDF</button> </div>`,
+    `<div class="summary"> <span>${resumo}</span> <div class="summary-btns"><button class="export-btn" id="btnExportar" type="button">⬇ Baixar PDF</button><button class="export-btn drive-btn" id="btnDrive" type="button">☁️ Salvar no Drive</button></div> </div>`,
+    `<div class="stats-row">
+      <div class="stat-box stat-ok"><span class="stat-num">${u.separadas}</span><span class="stat-label">Separadas</span></div>
+      <div class="stat-box stat-pend"><span class="stat-num">${u.pendentes}</span><span class="stat-label">Pendentes</span></div>
+      <div class="stat-box stat-bad"><span class="stat-num">${u.naoEncontradas}</span><span class="stat-label">Não encontradas</span></div>
+    </div>`,
     `<div class="filter-bar">${chips.map((ch) => `<button class="filter-chip ${ch.cls} ${filtroAtual === ch.key ? 'active' : ''}" data-filtro="${ch.key}">${ch.label}</button>`).join('')}</div>`
   ];
 
@@ -342,6 +354,8 @@ function renderTudo() {
   });
   const btnExp = document.getElementById('btnExportar');
   if (btnExp) btnExp.addEventListener('click', exportarPDF);
+  const btnDrive = document.getElementById('btnDrive');
+  if (btnDrive) btnDrive.addEventListener('click', exportarParaDrive);
 
   elResult.querySelectorAll('.qty-edit-toggle').forEach((btn) => {
     btn.addEventListener('click', () => onToggleEdicao(btn));
@@ -367,11 +381,18 @@ function renderCardsHtml(itens) {
     const isPartial = est.estado === 'parcial';
     const found = est.found;
 
-    // Card já marcado (Separado ou Parcial) nasce travado — precisa tocar em
-    // "Editar" para poder mexer na quantidade, evitando alteração sem querer.
+    // Card já com quantidade (Separado ou Parcial) nasce com o "−" travado —
+    // precisa tocar em "Editar" para diminuir/desfazer. O "+" continua
+    // sempre liberado, inclusive no parcial, já que adicionar não precisa
+    // de trava (só diminuir é que é "desfazer").
     const precisaDestravar = isOk || isPartial;
     const destravado = cardsEmEdicao.has(String(it.linha));
-    const travado = precisaDestravar && !destravado;
+    const minusTravado = precisaDestravar && !destravado;
+
+    // "Não encontrada" só faz sentido enquanto não há nada separado ainda.
+    // Com quantidade > 0 (total ou parcial), o botão fica desabilitado —
+    // para "desmarcar" seria preciso primeiro zerar a quantidade via edição.
+    const naoEncontradaDesabilitado = (isOk || isPartial) && !isBad;
 
     parts.push(`
       <div class="card ${isOk ? 'marked-ok' : ''} ${isBad ? 'marked-bad' : ''} ${isPartial ? 'marked-partial' : ''}" data-linha="${it.linha}" data-total="${total}">
@@ -379,9 +400,9 @@ function renderCardsHtml(itens) {
         <div class="stamp bad-stamp">Não encontrada</div>
         <div class="stamp partial-stamp">Parcial ${found}/${total}</div>
         <div class="card-head">
-          <div class="desc">${escapeHtml(it.descricao)}</div>
           <div class="codigo-chip">${escapeHtml(it.codigo)}</div>
         </div>
+        <div class="desc">${escapeHtml(it.descricao)}</div>
         <div class="meta-row">
           ${modo === 'ramal' ? '' : `
           <div class="meta local">
@@ -394,11 +415,11 @@ function renderCardsHtml(itens) {
             <div class="qty-label">Separado: <strong class="qty-value">${found}</strong> / ${total}</div>
             <div class="qty-stepper">
               ${precisaDestravar ? `<button class="qty-edit-toggle ${destravado ? 'active' : ''}" type="button" title="${destravado ? 'Travar' : 'Editar quantidade'}">${destravado ? '🔓' : '✎'}</button>` : ''}
-              <button class="qty-btn qty-minus" type="button" ${(travado || found <= 0) ? 'disabled' : ''}>−</button>
-              <button class="qty-btn qty-plus" type="button" ${(travado || found >= total) ? 'disabled' : ''}>+</button>
+              <button class="qty-btn qty-minus" type="button" ${(minusTravado || found <= 0) ? 'disabled' : ''}>−</button>
+              <button class="qty-btn qty-plus" type="button" ${found >= total ? 'disabled' : ''}>+</button>
             </div>
           </div>
-          <button class="bad-btn ${isBad ? 'active' : ''}" data-acao="Não encontrada">✕ Não encontrada</button>
+          <button class="bad-btn ${isBad ? 'active' : ''}" data-acao="Não encontrada" ${naoEncontradaDesabilitado ? 'disabled' : ''}>✕ Não encontrada</button>
         </div>
       </div>
     `);
@@ -407,8 +428,7 @@ function renderCardsHtml(itens) {
   return parts.join('');
 }
 
-function exportarPDF() {
-  if (!window.jspdf || !ultimosItens.length) return;
+function construirDocPDF() {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
   const itens = itensFiltrados();
@@ -449,8 +469,48 @@ function exportarPDF() {
     }
   });
 
-  const nomeArquivo = `separacao-${modo === 'ramal' ? 'ramal' : 'codigo'}-${String(ultimoTermo).replace(/[^\w-]/g, '_')}.pdf`;
-  doc.save(nomeArquivo);
+  return doc;
+}
+
+function nomeArquivoPDF() {
+  const agora = new Date();
+  const carimbo = agora.toISOString().slice(0, 16).replace('T', '_').replace(':', 'h');
+  return `separacao-${modo === 'ramal' ? 'ramal' : 'codigo'}-${String(ultimoTermo).replace(/[^\w-]/g, '_')}-${carimbo}.pdf`;
+}
+
+function exportarPDF() {
+  if (!window.jspdf || !ultimosItens.length) return;
+  const doc = construirDocPDF();
+  doc.save(nomeArquivoPDF());
+}
+
+async function exportarParaDrive() {
+  if (!window.jspdf || !ultimosItens.length) return;
+  if (!navigator.onLine) {
+    setStatus('Sem internet: não é possível salvar no Drive agora.', true);
+    return;
+  }
+  setStatus('Gerando PDF e enviando para o Drive...');
+  try {
+    const doc = construirDocPDF();
+    const base64 = doc.output('datauristring').split(',')[1];
+    const nomeArquivo = nomeArquivoPDF();
+
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'salvarPDF', nomeArquivo, conteudoBase64: base64 })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      setStatus('PDF salvo no Drive.');
+    } else {
+      setStatus(data.erro || 'Falha ao salvar no Drive.', true);
+    }
+  } catch (err) {
+    console.error(err);
+    setStatus('Não foi possível salvar no Drive agora.', true);
+  }
 }
 
 function rotuloFiltro(f) {
@@ -462,7 +522,6 @@ function rotuloFiltro(f) {
 // ===== Sincronização robusta (envio) =====
 
 function persistirSituacao(linha, novaSituacao) {
-  // 1) Atualiza local na hora, para resposta instantânea na tela
   const item = ultimosItens.find((it) => String(it.linha) === String(linha));
   if (item) item.situacao = novaSituacao;
 
@@ -477,13 +536,9 @@ function persistirSituacao(linha, novaSituacao) {
 
   renderTudo();
 
-  // 2) Guarda sempre o valor mais recente como "o que precisa estar no
-  // servidor" para essa linha — se o usuário apertar várias vezes seguidas,
-  // isso é sobrescrito e nunca acumula valores intermediários.
   valorPendente[String(linha)] = novaSituacao;
   atualizarBarraSync();
 
-  // 3) Agenda o envio (debounce). Cada novo toque cancela o timer anterior.
   if (timersEnvio[linha]) clearTimeout(timersEnvio[linha]);
   timersEnvio[linha] = setTimeout(() => {
     delete timersEnvio[linha];
@@ -491,13 +546,9 @@ function persistirSituacao(linha, novaSituacao) {
   }, DEBOUNCE_ENVIO_MS);
 }
 
-// Garante que NUNCA existam dois envios simultâneos para a mesma linha
-// (o que causava valores fora de ordem chegando na planilha). Se o valor
-// mudar de novo enquanto um envio está em andamento, o novo valor fica
-// esperando e é enviado automaticamente assim que o envio atual terminar.
 async function processarEnvio(linha) {
   const linhaStr = String(linha);
-  if (envioEmAndamento[linhaStr]) return; // já existe um fetch rodando para essa linha
+  if (envioEmAndamento[linhaStr]) return;
   const situacao = valorPendente[linhaStr];
   if (situacao === undefined) return;
 
@@ -505,8 +556,6 @@ async function processarEnvio(linha) {
   await enviarSituacao(linhaStr, situacao);
   delete envioEmAndamento[linhaStr];
 
-  // Se durante o envio o valor mudou de novo (ou o envio falhou e o valor
-  // continua pendente), processa de novo agora, sem esperar outro debounce.
   if (valorPendente[linhaStr] !== undefined) {
     processarEnvio(linhaStr);
   }
@@ -524,13 +573,10 @@ async function enviarSituacao(linha, novaSituacao) {
     const data = await res.json();
     if (!data.ok) throw new Error(data.erro || 'Erro ao salvar.');
 
-    // Confere se o Apps Script confirmou exatamente o valor que enviamos.
     if (data.situacao !== undefined && String(data.situacao).trim() !== String(novaSituacao).trim()) {
       throw new Error('A planilha confirmou um valor diferente do enviado.');
     }
 
-    // Só limpa o "pendente" se ainda for o mesmo valor que acabamos de
-    // confirmar — se mudou nesse meio-tempo, o processarEnvio vai reenviar.
     if (valorPendente[linha] === novaSituacao) {
       delete valorPendente[linha];
     }
@@ -566,6 +612,7 @@ function onQtdChange(btn, delta) {
 }
 
 function onNaoEncontrada(btn) {
+  if (btn.disabled) return;
   const card = btn.closest('.card');
   const linha = card.getAttribute('data-linha');
   const jaEstaAtivo = btn.classList.contains('active');
@@ -580,8 +627,6 @@ function escapeHtml(str) {
 }
 
 // ===== Situação com quantidade parcial =====
-// Formatos guardados na planilha: "" (pendente) | "Separado" (completo) |
-// "Parcial X/Y" (parte encontrada) | "Não encontrada"
 function parseSituacao(situacaoRaw, total) {
   const s = String(situacaoRaw || '').trim();
   const totalNum = parseFloat(total) || 0;
