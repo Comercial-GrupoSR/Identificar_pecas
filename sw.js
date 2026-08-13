@@ -1,4 +1,4 @@
-const CACHE_NAME = 'obra-app-v5';
+const CACHE_NAME = 'obra-app-v6';
 const ASSETS = [
   './',
   './index.html',
@@ -7,14 +7,12 @@ const ASSETS = [
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];
-
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
   self.skipWaiting();
 });
-
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -23,10 +21,8 @@ self.addEventListener('activate', (event) => {
   );
   self.clients.claim();
 });
-
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  // Nunca cachear chamadas ao Apps Script - sempre buscar dados atualizados
   if (url.hostname.includes('script.google.com')) {
     event.respondWith(fetch(event.request));
     return;
