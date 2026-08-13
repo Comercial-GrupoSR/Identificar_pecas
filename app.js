@@ -309,6 +309,9 @@ function renderTudo() {
   const btnExp = document.getElementById('btnExportar');
   if (btnExp) btnExp.addEventListener('click', exportarPDF);
 
+  elResult.querySelectorAll('.qty-edit-toggle').forEach((btn) => {
+    btn.addEventListener('click', () => onToggleEdicao(btn));
+  });
   elResult.querySelectorAll('.qty-plus').forEach((btn) => {
     btn.addEventListener('click', () => onQtdChange(btn, 1));
   });
@@ -329,6 +332,13 @@ function renderCardsHtml(itens) {
     const isBad = est.estado === 'nao_encontrada';
     const isPartial = est.estado === 'parcial';
     const found = est.found;
+
+    // Card já marcado (Separado ou Parcial) nasce travado — precisa tocar em
+    // "Editar" para poder mexer na quantidade, evitando alteração sem querer.
+    const precisaDestravar = isOk || isPartial;
+    const destravado = cardsEmEdicao.has(String(it.linha));
+    const travado = precisaDestravar && !destravado;
+
     parts.push(`
       <div class="card ${isOk ? 'marked-ok' : ''} ${isBad ? 'marked-bad' : ''} ${isPartial ? 'marked-partial' : ''}" data-linha="${it.linha}" data-total="${total}">
         <div class="stamp ok-stamp">Separado</div>
@@ -349,8 +359,9 @@ function renderCardsHtml(itens) {
           <div class="qty-track">
             <div class="qty-label">Separado: <strong class="qty-value">${found}</strong> / ${total}</div>
             <div class="qty-stepper">
-              <button class="qty-btn qty-minus" type="button" ${found <= 0 ? 'disabled' : ''}>−</button>
-              <button class="qty-btn qty-plus" type="button" ${found >= total ? 'disabled' : ''}>+</button>
+              ${precisaDestravar ? `<button class="qty-edit-toggle ${destravado ? 'active' : ''}" type="button" title="${destravado ? 'Travar' : 'Editar quantidade'}">${destravado ? '🔓' : '✎'}</button>` : ''}
+              <button class="qty-btn qty-minus" type="button" ${(travado || found <= 0) ? 'disabled' : ''}>−</button>
+              <button class="qty-btn qty-plus" type="button" ${(travado || found >= total) ? 'disabled' : ''}>+</button>
             </div>
           </div>
           <button class="bad-btn ${isBad ? 'active' : ''}" data-acao="Não encontrada">✕ Não encontrada</button>
@@ -462,6 +473,17 @@ async function enviarSituacao(linha, novaSituacao) {
     adicionarNaFila(linha, novaSituacao);
     setStatus('Sem conexão no momento: marcação salva no aparelho, será enviada depois.', true);
   }
+}
+
+function onToggleEdicao(btn) {
+  const card = btn.closest('.card');
+  const linha = String(card.getAttribute('data-linha'));
+  if (cardsEmEdicao.has(linha)) {
+    cardsEmEdicao.delete(linha);
+  } else {
+    cardsEmEdicao.add(linha);
+  }
+  renderTudo();
 }
 
 function onQtdChange(btn, delta) {
