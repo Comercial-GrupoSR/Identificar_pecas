@@ -10,6 +10,7 @@ const input = document.getElementById('inputCodigo');
 const btnBuscar = document.getElementById('btnBuscar');
 const tabCodigo = document.getElementById('tabCodigo');
 const tabRamal = document.getElementById('tabRamal');
+const tabResumo = document.getElementById('tabResumo');
 const ramaisList = document.getElementById('ramaisList');
 const syncStatusText = document.getElementById('syncStatusText');
 const btnSincronizar = document.getElementById('btnSincronizar');
@@ -85,7 +86,9 @@ async function baixarDadosCompletos(silencioso) {
 
       salvarDadosLocais(itensAjustados);
 
-      if (ultimosItens.length) {
+      if (modo === 'resumo') {
+        mostrarResumo();
+      } else if (ultimosItens.length) {
         itensAjustados.forEach((novo) => {
           const atual = ultimosItens.find((it) => String(it.linha) === String(novo.linha));
           if (atual) atual.situacao = novo.situacao;
@@ -191,25 +194,45 @@ function setModo(novoModo) {
   setStatus('');
   input.value = '';
 
+  [tabCodigo, tabRamal, tabResumo].forEach((t) => t.classList.remove('active'));
+
   if (modo === 'codigo') {
     tabCodigo.classList.add('active');
-    tabRamal.classList.remove('active');
+    form.style.display = '';
     input.placeholder = 'Digite o código da peça…';
     input.setAttribute('inputmode', 'numeric');
     input.removeAttribute('list');
-  } else {
+    input.focus();
+  } else if (modo === 'ramal') {
     tabRamal.classList.add('active');
-    tabCodigo.classList.remove('active');
+    form.style.display = '';
     input.placeholder = 'Digite ou escolha o ramal…';
     input.setAttribute('inputmode', 'text');
     input.setAttribute('list', 'ramaisList');
     preencherListaRamais();
+    input.focus();
+  } else if (modo === 'resumo') {
+    tabResumo.classList.add('active');
+    form.style.display = 'none';
+    mostrarResumo();
   }
-  input.focus();
 }
 
 tabCodigo.addEventListener('click', () => setModo('codigo'));
 tabRamal.addEventListener('click', () => setModo('ramal'));
+tabResumo.addEventListener('click', () => setModo('resumo'));
+
+function mostrarResumo() {
+  const dados = carregarDadosLocais();
+  if (!dados || !dados.itens || !dados.itens.length) {
+    elResult.innerHTML = '<div class="empty">Ainda não há dados sincronizados no aparelho. Toque em 🔄 Sincronizar.</div>';
+    return;
+  }
+  ultimosItens = dados.itens;
+  ultimoTermo = 'Todos os itens';
+  filtroAtual = 'todos';
+  renderTudo();
+}
 
 function preencherListaRamais() {
   const dados = carregarDadosLocais();
@@ -315,7 +338,9 @@ function renderTudo() {
   const totalQtde = ultimosItens.reduce((acc, it) => acc + (parseFloat(it.qtde) || 0), 0);
   const resumo = modo === 'ramal'
     ? `${escapeHtml(ultimoTermo)} · ${ultimosItens.length} peça(s) · ${totalQtde} unidade(s) no total`
-    : `${ultimosItens.length} local(is) · ${totalQtde} peça(s) no total`;
+    : modo === 'resumo'
+      ? `${ultimosItens.length} peça(s) cadastradas · ${totalQtde} unidade(s) no total`
+      : `${ultimosItens.length} local(is) · ${totalQtde} peça(s) no total`;
 
   const c = contarPorSituacao(ultimosItens);
   const u = contarUnidadesPorSituacao(ultimosItens);
@@ -439,7 +464,7 @@ function construirDocPDF() {
   doc.text('Separação de Peças — Obra', 14, 16);
   doc.setFontSize(10);
   doc.setTextColor(100);
-  const rotulo = modo === 'ramal' ? 'Ramal' : 'Código';
+  const rotulo = modo === 'ramal' ? 'Ramal' : modo === 'resumo' ? 'Resumo geral' : 'Código';
   doc.text(`${rotulo}: ${ultimoTermo} · Filtro: ${rotuloFiltro(filtroAtual)} · Gerado em ${dataStr}`, 14, 22);
 
   const colunas = modo === 'ramal'
@@ -475,7 +500,9 @@ function construirDocPDF() {
 function nomeArquivoPDF() {
   const agora = new Date();
   const carimbo = agora.toISOString().slice(0, 16).replace('T', '_').replace(':', 'h');
-  return `separacao-${modo === 'ramal' ? 'ramal' : 'codigo'}-${String(ultimoTermo).replace(/[^\w-]/g, '_')}-${carimbo}.pdf`;
+  const prefixo = modo === 'ramal' ? 'ramal' : modo === 'resumo' ? 'resumo-geral' : 'codigo';
+  const sufixo = modo === 'resumo' ? carimbo : `${String(ultimoTermo).replace(/[^\w-]/g, '_')}-${carimbo}`;
+  return `separacao-${prefixo}-${sufixo}.pdf`;
 }
 
 function exportarPDF() {
